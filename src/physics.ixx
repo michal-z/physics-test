@@ -1,6 +1,7 @@
 module;
 #include "pch.h"
 export module physics;
+import graphics;
 namespace physics {
 
 using namespace DirectX;
@@ -18,7 +19,7 @@ struct DEBUG_DRAW : public btIDebugDraw {
         lines.push_back({ .position = p0, .color = packed_color });
         lines.push_back({ .position = p1, .color = packed_color });
     }
-	virtual void drawLine(
+    virtual void drawLine(
         const btVector3& from,
         const btVector3& to,
         const btVector3& fromColor,
