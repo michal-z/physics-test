@@ -317,7 +317,7 @@ export struct GRAPHICS {
     } d2d;
 };
 
-export bool Init_Context(GRAPHICS* gr, HWND window) {
+export bool Init_Graphics(GRAPHICS* gr, HWND window) {
     assert(gr && window);
 
     CoInitialize(NULL);
@@ -533,7 +533,7 @@ export bool Init_Context(GRAPHICS* gr, HWND window) {
     return true;
 }
 
-export void Deinit_Context(GRAPHICS* gr) {
+export void Deinit_Graphics(GRAPHICS* gr) {
     assert(gr);
     for (U32 i = 0; i < max_num_frames_in_flight; ++i) {
         MZ_SAFE_RELEASE(gr->cmdallocs[i]);

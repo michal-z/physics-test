@@ -177,6 +177,7 @@
     <ClCompile Include="..\src\graphics.ixx" />
     <ClCompile Include="..\src\library.ixx" />
     <ClCompile Include="..\src\main.cpp" />
+    <ClCompile Include="..\src\physics.ixx" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\src\cpp_hlsl_common.h" />

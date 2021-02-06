@@ -2,12 +2,12 @@ module;
 #include "pch.h"
 export module demo;
 import graphics;
+import physics;
 import library;
 namespace demo {
 
 using namespace DirectX;
 using namespace DirectX::PackedVector;
-
 #include "cpp_hlsl_common.h"
 
 constexpr U32 num_msaa_samples = 1;
@@ -25,6 +25,7 @@ struct RENDERABLE {
 
 struct DEMO_STATE {
     graphics::GRAPHICS graphics;
+    physics::PHYSICS physics;
     library::FRAME_STATS frame_stats;
     library::IMGUI_CONTEXT gui;
     VECTOR<MESH> meshes;
@@ -112,9 +113,13 @@ bool Init_Demo_State(DEMO_STATE* demo) {
     assert(demo);
 
     const HWND window = library::Create_Window("demo", 1920, 1080, /* init_imgui */ true);
-    if (!graphics::Init_Context(&demo->graphics, window)) {
+    if (!graphics::Init_Graphics(&demo->graphics, window)) {
         return false;
     }
+    if (!physics::Init_Physics(&demo->physics)) {
+        return false;
+    }
+
     graphics::GRAPHICS* gr = &demo->graphics;
 
     {
@@ -332,8 +337,9 @@ bool Init_Demo_State(DEMO_STATE* demo) {
 
 void Deinit_Demo_State(DEMO_STATE* demo) {
     assert(demo);
-    graphics::GRAPHICS* gr = &demo->graphics;
+    physics::Deinit_Physics(&demo->physics);
 
+    graphics::GRAPHICS* gr = &demo->graphics;
     graphics::Finish_Gpu_Commands(gr);
     library::Deinit_Gui_Context(&demo->gui, gr);
     ImGui::DestroyContext();
@@ -345,7 +351,7 @@ void Deinit_Demo_State(DEMO_STATE* demo) {
     graphics::Release_Resource(gr, demo->srgb_texture);
     graphics::Release_Resource(gr, demo->depth_texture);
     graphics::Release_Pipeline(gr, demo->mesh_pso);
-    graphics::Deinit_Context(gr);
+    graphics::Deinit_Graphics(gr);
 }
 
 void Update_Demo_State(DEMO_STATE* demo) {

@@ -1,10 +1,13 @@
-#pragma once
-
 struct VERTEX {
     XMFLOAT3 position;
     XMFLOAT3 normal;
     XMFLOAT4 tangent;
     XMFLOAT2 uv;
+};
+
+struct DEBUG_VERTEX {
+    XMFLOAT3 position;
+    U32 color;
 };
 
 struct DRAW_COMMAND {

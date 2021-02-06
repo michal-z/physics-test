@@ -64,6 +64,7 @@
     <ClCompile Include="..\src\external\Bullet\bullet_math.cpp">
       <Filter>external\Bullet</Filter>
     </ClCompile>
+    <ClCompile Include="..\src\physics.ixx" />
   </ItemGroup>
   <ItemGroup>
     <Filter Include="external">
