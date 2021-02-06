@@ -46,7 +46,6 @@ struct DEMO_STATE {
     } hud;
     struct {
         XMFLOAT3 position;
-        XMFLOAT3 forward;
         F32 pitch;
         F32 yaw;
     } camera;
@@ -353,6 +352,8 @@ void Deinit_Demo_State(DEMO_STATE* demo) {
 void Update_Demo_State(DEMO_STATE* demo) {
     assert(demo);
 
+    graphics::CONTEXT* gr = &demo->graphics;
+
     library::Update_Frame_Stats(&demo->frame_stats);
     library::Update_Gui(demo->frame_stats.delta_time);
 
@@ -374,6 +375,13 @@ void Update_Demo_State(DEMO_STATE* demo) {
         }
     }
     // Handle camera movement with 'WASD' keys.
+    const XMMATRIX camera_view_to_clip = XMMatrixPerspectiveFovLH(
+        XM_PI / 3.0f,
+        (F32)gr->viewport_width / gr->viewport_height,
+        0.1f,
+        100.0f
+    );
+    XMMATRIX camera_world_to_view = {};
     {
         const F32 speed = 5.0f;
         const F32 delta_time = demo->frame_stats.delta_time;
@@ -382,7 +390,6 @@ void Update_Demo_State(DEMO_STATE* demo) {
         XMVECTOR forward = XMVector3Normalize(
             XMVector3Transform(XMVectorSet(0.0f, 0.0f, 1.0f, 0.0f), transform)
         );
-        XMStoreFloat3(&demo->camera.forward, forward);
         const XMVECTOR right = speed * delta_time * XMVector3Normalize(
             XMVector3Cross(XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f), forward)
         );
@@ -402,9 +409,12 @@ void Update_Demo_State(DEMO_STATE* demo) {
             const XMVECTOR newpos = XMLoadFloat3(&demo->camera.position) - right;
             XMStoreFloat3(&demo->camera.position, newpos);
         }
+        camera_world_to_view = XMMatrixLookToLH(
+            XMLoadFloat3(&demo->camera.position),
+            forward,
+            XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f)
+        );
     }
-
-    graphics::CONTEXT* gr = &demo->graphics;
 
     graphics::Begin_Frame(gr);
 
@@ -421,18 +431,6 @@ void Update_Demo_State(DEMO_STATE* demo) {
     );
 
     D3D12_GPU_VIRTUAL_ADDRESS glob_buffer_addr = {};
-
-    const XMMATRIX camera_world_to_view = XMMatrixLookToLH(
-        XMLoadFloat3(&demo->camera.position),
-        XMLoadFloat3(&demo->camera.forward),
-        XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f)
-    );
-    const XMMATRIX camera_view_to_clip = XMMatrixPerspectiveFovLH(
-        XM_PI / 3.0f,
-        (F32)gr->viewport_width / gr->viewport_height,
-        0.1f,
-        100.0f
-    );
 
     // Upload 'GLOBALS' data.
     {
