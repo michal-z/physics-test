@@ -133,7 +133,6 @@ bool Init_Demo_State(DEMO_STATE* demo) {
             .DSVFormat = DXGI_FORMAT_D32_FLOAT,
             .SampleDesc = { .Count = num_msaa_samples, .Quality = 0 },
         };
-        desc.RasterizerState.CullMode = D3D12_CULL_MODE_BACK;
         desc.RasterizerState.MultisampleEnable = num_msaa_samples > 1 ? TRUE : FALSE;
         demo->mesh_pso = graphics::Create_Graphics_Shader_Pipeline(gr, &desc);
     }
