@@ -65,7 +65,6 @@
     </FxCompile>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <FxCompile Include="..\src\shaders\generate_brdf_integration_texture_cs.hlsl" />
     <FxCompile Include="..\src\shaders\generate_mipmaps_cs.hlsl" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
