@@ -1,12 +1,6 @@
 #include "pch.h"
 import demo;
 
-void* operator new[](size_t size) {
-    void* ptr = _aligned_malloc(size, 16);
-    assert(ptr);
-    return ptr;
-}
-
 // Used by EASTL.
 void* operator new[](
     size_t size,
@@ -37,7 +31,15 @@ void* operator new[](
     return ptr;
 }
 
-void operator delete[](void* ptr) {
+// Used by EASTL.
+void operator delete[](
+    void* ptr,
+    const char* /* name */,
+    int /* flags */,
+    unsigned /* debug_flags */,
+    const char* /* file */,
+    int /* line */
+) {
     if (ptr) {
         _aligned_free(ptr);
     }
