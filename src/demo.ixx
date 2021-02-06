@@ -476,7 +476,7 @@ void Update_Demo_State(DEMO_STATE* demo) {
         graphics::Flush_Resource_Barriers(gr);
     }
 
-    const auto buffer_table_base = graphics::Copy_Descriptors_To_Gpu_Heap(
+    const D3D12_GPU_DESCRIPTOR_HANDLE buffer_table_base = graphics::Copy_Descriptors_To_Gpu_Heap(
         gr,
         1,
         demo->vertex_buffer_srv
