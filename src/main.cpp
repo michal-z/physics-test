@@ -1,7 +1,7 @@
 #include "pch.h"
 import demo;
 
-// Used by EASTL.
+// Used only by EASTL.
 void* operator new[](
     size_t size,
     const char* /* name */,
@@ -15,7 +15,7 @@ void* operator new[](
     return ptr;
 }
 
-// Used by EASTL.
+// Used only by EASTL.
 void* operator new[](
     size_t size,
     size_t alignment,
@@ -31,7 +31,7 @@ void* operator new[](
     return ptr;
 }
 
-// Used by EASTL.
+// Used only by EASTL (I've added this overload to EASTL/allocator.h, see: allocator::deallocate(...)).
 void operator delete[](
     void* ptr,
     const char* /* name */,
