@@ -24,7 +24,7 @@ struct RENDERABLE {
 };
 
 struct DEMO_STATE {
-    graphics::CONTEXT graphics;
+    graphics::GRAPHICS graphics;
     library::FRAME_STATS frame_stats;
     library::IMGUI_CONTEXT gui;
     VECTOR<MESH> meshes;
@@ -85,7 +85,7 @@ void Add_Mesh(
 }
 
 template<typename T> void Upload_To_Gpu(
-    graphics::CONTEXT* gr,
+    graphics::GRAPHICS* gr,
     graphics::RESOURCE_HANDLE resource,
     const VECTOR<T>* data,
     D3D12_RESOURCE_STATES state
@@ -115,7 +115,7 @@ bool Init_Demo_State(DEMO_STATE* demo) {
     if (!graphics::Init_Context(&demo->graphics, window)) {
         return false;
     }
-    graphics::CONTEXT* gr = &demo->graphics;
+    graphics::GRAPHICS* gr = &demo->graphics;
 
     {
         const VECTOR<U8> vs = library::Load_File("data/shaders/mesh_vs_ps.vs.cso");
@@ -332,7 +332,7 @@ bool Init_Demo_State(DEMO_STATE* demo) {
 
 void Deinit_Demo_State(DEMO_STATE* demo) {
     assert(demo);
-    graphics::CONTEXT* gr = &demo->graphics;
+    graphics::GRAPHICS* gr = &demo->graphics;
 
     graphics::Finish_Gpu_Commands(gr);
     library::Deinit_Gui_Context(&demo->gui, gr);
@@ -351,7 +351,7 @@ void Deinit_Demo_State(DEMO_STATE* demo) {
 void Update_Demo_State(DEMO_STATE* demo) {
     assert(demo);
 
-    graphics::CONTEXT* gr = &demo->graphics;
+    graphics::GRAPHICS* gr = &demo->graphics;
 
     library::Update_Frame_Stats(&demo->frame_stats);
     library::Update_Gui(demo->frame_stats.delta_time);

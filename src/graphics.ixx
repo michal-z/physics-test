@@ -276,7 +276,7 @@ PIPELINE* Get_Pipeline_Info(PIPELINE_POOL* pool, PIPELINE_HANDLE handle) {
     return pipeline;
 }
 
-export struct CONTEXT {
+export struct GRAPHICS {
     ID3D12_DEVICE* device;
     ID3D12_GRAPHICS_COMMAND_LIST* cmdlist;
     ID3D12_COMMAND_QUEUE* cmdqueue;
@@ -317,7 +317,7 @@ export struct CONTEXT {
     } d2d;
 };
 
-export bool Init_Context(CONTEXT* gr, HWND window) {
+export bool Init_Context(GRAPHICS* gr, HWND window) {
     assert(gr && window);
 
     CoInitialize(NULL);
@@ -533,7 +533,7 @@ export bool Init_Context(CONTEXT* gr, HWND window) {
     return true;
 }
 
-export void Deinit_Context(CONTEXT* gr) {
+export void Deinit_Context(GRAPHICS* gr) {
     assert(gr);
     for (U32 i = 0; i < max_num_frames_in_flight; ++i) {
         MZ_SAFE_RELEASE(gr->cmdallocs[i]);
@@ -563,7 +563,7 @@ export void Deinit_Context(CONTEXT* gr) {
     MZ_SAFE_RELEASE(gr->device);
 }
 
-export void Begin_Frame(CONTEXT* gr) {
+export void Begin_Frame(GRAPHICS* gr) {
     assert(gr);
 
     ID3D12_COMMAND_ALLOCATOR* cmdalloc = gr->cmdallocs[gr->frame_index];
@@ -596,7 +596,7 @@ export void Begin_Frame(CONTEXT* gr) {
     gr->pipeline.current = {};
 }
 
-export void End_Frame(CONTEXT* gr) {
+export void End_Frame(GRAPHICS* gr) {
     assert(gr);
 
     gr->frame_fence_counter += 1;
@@ -617,7 +617,7 @@ export void End_Frame(CONTEXT* gr) {
     gr->upload_heaps[gr->frame_index].size = 0;
 }
 
-export void Flush_Resource_Barriers(CONTEXT* gr) {
+export void Flush_Resource_Barriers(GRAPHICS* gr) {
     assert(gr);
 
     if (!gr->buffered_resource_barriers.empty()) {
@@ -629,7 +629,7 @@ export void Flush_Resource_Barriers(CONTEXT* gr) {
     }
 }
 
-export void Flush_Gpu_Commands(CONTEXT* gr) {
+export void Flush_Gpu_Commands(GRAPHICS* gr) {
     assert(gr);
     Flush_Resource_Barriers(gr);
     VHR(gr->cmdlist->Close());
@@ -637,7 +637,7 @@ export void Flush_Gpu_Commands(CONTEXT* gr) {
     gr->cmdqueue->ExecuteCommandLists(1, &cmdlist);
 }
 
-export void Begin_Draw_2D(CONTEXT* gr) {
+export void Begin_Draw_2D(GRAPHICS* gr) {
     assert(gr);
 
     Flush_Gpu_Commands(gr);
@@ -650,7 +650,7 @@ export void Begin_Draw_2D(CONTEXT* gr) {
     gr->d2d.context->BeginDraw();
 }
 
-export void End_Draw_2D(CONTEXT* gr) {
+export void End_Draw_2D(GRAPHICS* gr) {
     assert(gr);
 
     VHR(gr->d2d.context->EndDraw(NULL, NULL));
@@ -670,7 +670,7 @@ export void End_Draw_2D(CONTEXT* gr) {
     back_buffer->state = D3D12_RESOURCE_STATE_PRESENT;
 }
 
-export void Finish_Gpu_Commands(CONTEXT* gr) {
+export void Finish_Gpu_Commands(GRAPHICS* gr) {
     assert(gr);
 
     gr->frame_fence_counter += 1;
@@ -683,7 +683,7 @@ export void Finish_Gpu_Commands(CONTEXT* gr) {
     gr->upload_heaps[gr->frame_index].size = 0;
 }
 
-export inline TUPLE<RESOURCE_HANDLE, D3D12_CPU_DESCRIPTOR_HANDLE> Get_Back_Buffer(CONTEXT* gr) {
+export inline TUPLE<RESOURCE_HANDLE, D3D12_CPU_DESCRIPTOR_HANDLE> Get_Back_Buffer(GRAPHICS* gr) {
     return {
         gr->swapchain_buffers[gr->back_buffer_index],
         { .ptr = gr->rtv_heap.base.cpu_handle.ptr + gr->back_buffer_index * gr->rtv_heap.descriptor_size }
@@ -691,7 +691,7 @@ export inline TUPLE<RESOURCE_HANDLE, D3D12_CPU_DESCRIPTOR_HANDLE> Get_Back_Buffe
 }
 
 export void Add_Transition_Barrier(
-    CONTEXT* gr,
+    GRAPHICS* gr,
     RESOURCE_HANDLE handle,
     D3D12_RESOURCE_STATES state_after
 ) {
@@ -712,7 +712,7 @@ export void Add_Transition_Barrier(
 }
 
 export RESOURCE_HANDLE Create_Committed_Resource(
-    CONTEXT* gr,
+    GRAPHICS* gr,
     D3D12_HEAP_TYPE heap_type,
     D3D12_HEAP_FLAGS heap_flags,
     const D3D12_RESOURCE_DESC* desc,
@@ -733,7 +733,7 @@ export RESOURCE_HANDLE Create_Committed_Resource(
 }
 
 export D3D12_CPU_DESCRIPTOR_HANDLE Allocate_Cpu_Descriptors(
-    CONTEXT* gr,
+    GRAPHICS* gr,
     D3D12_DESCRIPTOR_HEAP_TYPE type,
     U32 num
 ) {
@@ -754,7 +754,7 @@ export D3D12_CPU_DESCRIPTOR_HANDLE Allocate_Cpu_Descriptors(
 }
 
 export D3D12_CPU_DESCRIPTOR_HANDLE Allocate_Cpu_Temp_Descriptors(
-    CONTEXT* gr,
+    GRAPHICS* gr,
     D3D12_DESCRIPTOR_HEAP_TYPE type,
     U32 num
 ) {
@@ -779,7 +779,7 @@ export D3D12_CPU_DESCRIPTOR_HANDLE Allocate_Cpu_Temp_Descriptors(
 }
 
 export void Deallocate_Cpu_Temp_Descriptors(
-    CONTEXT* gr,
+    GRAPHICS* gr,
     D3D12_DESCRIPTOR_HEAP_TYPE type
 ) {
     assert(gr);
@@ -804,18 +804,18 @@ export void Deallocate_Cpu_Temp_Descriptors(
     }
 }
 
-DESCRIPTOR Allocate_Gpu_Descriptors(CONTEXT* gr, U32 num) {
+DESCRIPTOR Allocate_Gpu_Descriptors(GRAPHICS* gr, U32 num) {
     assert(gr && num > 0);
     return Allocate_Descriptors(&gr->cbv_srv_uav_gpu_heaps[gr->frame_index], num);
 }
 
-export U32 Increment_Resource_Refcount(CONTEXT* gr, RESOURCE_HANDLE handle) {
+export U32 Increment_Resource_Refcount(GRAPHICS* gr, RESOURCE_HANDLE handle) {
     assert(gr);
     RESOURCE* resource = Get_Resource_Info(&gr->resource_pool, handle);
     return resource->raw->AddRef();
 }
 
-export U32 Release_Resource(CONTEXT* gr, RESOURCE_HANDLE handle) {
+export U32 Release_Resource(GRAPHICS* gr, RESOURCE_HANDLE handle) {
     assert(gr);
     if (Is_Resource_Valid(&gr->resource_pool, handle)) {
         RESOURCE* resource = Get_Resource_Info(&gr->resource_pool, handle);
@@ -828,11 +828,11 @@ export U32 Release_Resource(CONTEXT* gr, RESOURCE_HANDLE handle) {
     return 0;
 }
 
-export inline ID3D12_RESOURCE* Get_Resource(CONTEXT* gr, RESOURCE_HANDLE handle) {
+export inline ID3D12_RESOURCE* Get_Resource(GRAPHICS* gr, RESOURCE_HANDLE handle) {
     return Get_Resource_Info(&gr->resource_pool, handle)->raw;
 }
 
-export inline U64 Get_Resource_Size(CONTEXT* gr, RESOURCE_HANDLE handle) {
+export inline U64 Get_Resource_Size(GRAPHICS* gr, RESOURCE_HANDLE handle) {
     if (Is_Resource_Valid(&gr->resource_pool, handle)) {
         RESOURCE* resource = Get_Resource_Info(&gr->resource_pool, handle);
         assert(resource->desc.Dimension == D3D12_RESOURCE_DIMENSION_BUFFER);
@@ -841,13 +841,13 @@ export inline U64 Get_Resource_Size(CONTEXT* gr, RESOURCE_HANDLE handle) {
     return 0;
 }
 
-export inline D3D12_RESOURCE_DESC Get_Resource_Desc(CONTEXT* gr, RESOURCE_HANDLE handle) {
+export inline D3D12_RESOURCE_DESC Get_Resource_Desc(GRAPHICS* gr, RESOURCE_HANDLE handle) {
     RESOURCE* resource = Get_Resource_Info(&gr->resource_pool, handle);
     assert(resource->desc.Dimension != D3D12_RESOURCE_DIMENSION_BUFFER);
     return resource->desc;
 }
 
-export U32 Increment_Pipeline_Refcount(CONTEXT* gr, PIPELINE_HANDLE handle) {
+export U32 Increment_Pipeline_Refcount(GRAPHICS* gr, PIPELINE_HANDLE handle) {
     assert(gr);
     PIPELINE* pipeline = Get_Pipeline_Info(&gr->pipeline.pool, handle);
     const U32 refcount = pipeline->pso->AddRef();
@@ -855,7 +855,7 @@ export U32 Increment_Pipeline_Refcount(CONTEXT* gr, PIPELINE_HANDLE handle) {
     return refcount;
 }
 
-export U32 Release_Pipeline(CONTEXT* gr, PIPELINE_HANDLE handle) {
+export U32 Release_Pipeline(GRAPHICS* gr, PIPELINE_HANDLE handle) {
     if (!Is_Pipeline_Valid(&gr->pipeline.pool, handle)) {
         return 0;
     }
@@ -877,7 +877,7 @@ export U32 Release_Pipeline(CONTEXT* gr, PIPELINE_HANDLE handle) {
     return refcount;
 }
 
-export void Set_Pipeline_State(CONTEXT* gr, PIPELINE_HANDLE pipeline_handle) {
+export void Set_Pipeline_State(GRAPHICS* gr, PIPELINE_HANDLE pipeline_handle) {
     // TODO: Do we need to unset pipeline state (0, 0)?
     PIPELINE* pipeline = Get_Pipeline_Info(&gr->pipeline.pool, pipeline_handle);
     if (pipeline_handle.index == gr->pipeline.current.index &&
@@ -894,7 +894,7 @@ export void Set_Pipeline_State(CONTEXT* gr, PIPELINE_HANDLE pipeline_handle) {
 }
 
 export PIPELINE_HANDLE Create_Compute_Shader_Pipeline(
-    CONTEXT* gr,
+    GRAPHICS* gr,
     D3D12_COMPUTE_PIPELINE_STATE_DESC* pso_desc
 ) {
     assert(gr && pso_desc && pso_desc->CS.pShaderBytecode);
@@ -939,7 +939,7 @@ export PIPELINE_HANDLE Create_Compute_Shader_Pipeline(
 }
 
 export PIPELINE_HANDLE Create_Graphics_Shader_Pipeline(
-    CONTEXT* gr,
+    GRAPHICS* gr,
     D3D12_GRAPHICS_PIPELINE_STATE_DESC* pso_desc
 ) {
     assert(gr && pso_desc && pso_desc->VS.pShaderBytecode && pso_desc->PS.pShaderBytecode);
@@ -1034,7 +1034,7 @@ export PIPELINE_HANDLE Create_Graphics_Shader_Pipeline(
 }
 
 export PIPELINE_HANDLE Create_Mesh_Shader_Pipeline(
-    CONTEXT* gr,
+    GRAPHICS* gr,
     D3DX12_MESH_SHADER_PIPELINE_STATE_DESC* pso_desc
 ) {
     assert(gr && pso_desc && pso_desc->MS.pShaderBytecode);
@@ -1096,7 +1096,7 @@ export PIPELINE_HANDLE Create_Mesh_Shader_Pipeline(
 }
 
 export TUPLE<U8*, D3D12_GPU_VIRTUAL_ADDRESS> Allocate_Upload_Memory(
-    CONTEXT* gr,
+    GRAPHICS* gr,
     U32 mem_size
 ) {
     assert(gr && mem_size > 0);
@@ -1120,7 +1120,7 @@ export TUPLE<U8*, D3D12_GPU_VIRTUAL_ADDRESS> Allocate_Upload_Memory(
 }
 
 export template<typename T> inline TUPLE<SPAN<T>, ID3D12_RESOURCE*, U64> Allocate_Upload_Buffer_Region(
-    CONTEXT* gr,
+    GRAPHICS* gr,
     U32 num
 ) {
     assert(gr && num > 0);
@@ -1135,7 +1135,7 @@ export template<typename T> inline TUPLE<SPAN<T>, ID3D12_RESOURCE*, U64> Allocat
 }
 
 export inline D3D12_GPU_DESCRIPTOR_HANDLE Copy_Descriptors_To_Gpu_Heap(
-    CONTEXT* gr,
+    GRAPHICS* gr,
     U32 num,
     D3D12_CPU_DESCRIPTOR_HANDLE src_base
 ) {
@@ -1279,7 +1279,7 @@ U32 Get_Bytes_Per_Pixel(DXGI_FORMAT fmt) {
 }
 
 export void Update_Tex2D_Subresource(
-    CONTEXT* gr,
+    GRAPHICS* gr,
     RESOURCE_HANDLE texture,
     U32 subresource,
     void* data,
@@ -1331,7 +1331,7 @@ export void Update_Tex2D_Subresource(
 }
 
 export TUPLE<RESOURCE_HANDLE, D3D12_CPU_DESCRIPTOR_HANDLE> Create_Texture_From_File(
-    CONTEXT* gr,
+    GRAPHICS* gr,
     const WCHAR* filename
 ) {
     assert(gr && filename);

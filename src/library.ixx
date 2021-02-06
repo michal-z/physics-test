@@ -278,7 +278,7 @@ export struct IMGUI_CONTEXT {
     D3D12_CPU_DESCRIPTOR_HANDLE font_srv;
 };
 
-export void Init_Gui_Context(IMGUI_CONTEXT* gui, graphics::CONTEXT* gr, U32 num_msaa_samples) {
+export void Init_Gui_Context(IMGUI_CONTEXT* gui, graphics::GRAPHICS* gr, U32 num_msaa_samples) {
     assert(gui && gr && num_msaa_samples > 0);
 
     ImGuiIO* io = &ImGui::GetIO();
@@ -359,7 +359,7 @@ export void Init_Gui_Context(IMGUI_CONTEXT* gui, graphics::CONTEXT* gr, U32 num_
     gui->pso = graphics::Create_Graphics_Shader_Pipeline(gr, &pso_desc);
 }
 
-export void Deinit_Gui_Context(IMGUI_CONTEXT* gui, graphics::CONTEXT* gr) {
+export void Deinit_Gui_Context(IMGUI_CONTEXT* gui, graphics::GRAPHICS* gr) {
     assert(gui && gr);
     graphics::Release_Resource(gr, gui->font);
     graphics::Release_Pipeline(gr, gui->pso);
@@ -378,7 +378,7 @@ export void Update_Gui(F32 delta_time) {
     ImGui::NewFrame();
 }
 
-export void Draw_Gui(IMGUI_CONTEXT* gui, graphics::CONTEXT* gr) {
+export void Draw_Gui(IMGUI_CONTEXT* gui, graphics::GRAPHICS* gr) {
     assert(gui && gr);
 
     ImGui::Render();
@@ -520,7 +520,7 @@ export struct MIPMAP_GENERATOR {
     DXGI_FORMAT format;
 };
 
-export void Init_Mipmap_Generator(MIPMAP_GENERATOR* mipgen, graphics::CONTEXT* gr, DXGI_FORMAT format) {
+export void Init_Mipmap_Generator(MIPMAP_GENERATOR* mipgen, graphics::GRAPHICS* gr, DXGI_FORMAT format) {
     assert(mipgen && gr);
 
     U32 width = 2048 / 2;
@@ -562,7 +562,7 @@ export void Init_Mipmap_Generator(MIPMAP_GENERATOR* mipgen, graphics::CONTEXT* g
     mipgen->format = format;
 }
 
-export void Deinit_Mipmap_Generator(MIPMAP_GENERATOR* mipgen, graphics::CONTEXT* gr) {
+export void Deinit_Mipmap_Generator(MIPMAP_GENERATOR* mipgen, graphics::GRAPHICS* gr) {
     assert(mipgen && gr);
     graphics::Release_Pipeline(gr, mipgen->pso);
     for (U32 i = 0; i < eastl::size(mipgen->scratch_textures); ++i) {
@@ -572,7 +572,7 @@ export void Deinit_Mipmap_Generator(MIPMAP_GENERATOR* mipgen, graphics::CONTEXT*
 
 export void Generate_Mipmaps(
     MIPMAP_GENERATOR* mipgen,
-    graphics::CONTEXT* gr,
+    graphics::GRAPHICS* gr,
     graphics::RESOURCE_HANDLE texture
 ) {
     assert(mipgen && gr);
