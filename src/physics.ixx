@@ -84,7 +84,7 @@ export bool Init_Physics(PHYSICS* px) {
 }
 
 export void Deinit_Physics(PHYSICS* px) {
-    assert(px && px->collision_config);
+    assert(px && px->collision_config && px->world);
     delete px->debug;
     delete px->world;
     delete px->solver;
