@@ -1095,7 +1095,7 @@ export PIPELINE_HANDLE Create_Mesh_Shader_Pipeline(
     return handle;
 }
 
-export TUPLE<U8*, D3D12_GPU_VIRTUAL_ADDRESS> Allocate_Upload_Memory(
+export TUPLE<SPAN<U8>, D3D12_GPU_VIRTUAL_ADDRESS> Allocate_Upload_Memory(
     GRAPHICS* gr,
     U32 mem_size
 ) {
@@ -1116,7 +1116,7 @@ export TUPLE<U8*, D3D12_GPU_VIRTUAL_ADDRESS> Allocate_Upload_Memory(
         gpu_addr = gaddr;
     }
     assert(cpu_addr != NULL && gpu_addr != 0);
-    return { cpu_addr, gpu_addr };
+    return { { cpu_addr, mem_size }, gpu_addr };
 }
 
 export template<typename T> inline TUPLE<SPAN<T>, ID3D12_RESOURCE*, U64> Allocate_Upload_Buffer_Region(
@@ -1125,10 +1125,10 @@ export template<typename T> inline TUPLE<SPAN<T>, ID3D12_RESOURCE*, U64> Allocat
 ) {
     assert(gr && num > 0);
     const U32 mem_size = num * sizeof T;
-    const auto [cpu_addr, gpu_addr] = Allocate_Upload_Memory(gr, mem_size);
+    const auto [cpu_span, gpu_addr] = Allocate_Upload_Memory(gr, mem_size);
     const U32 aligned_size = (mem_size + (upload_alloc_alignment - 1)) & ~(upload_alloc_alignment - 1);
     return {
-        { (T*)cpu_addr, num },
+        { (T*)cpu_span.data(), num },
         gr->upload_heaps[gr->frame_index].heap,
         gr->upload_heaps[gr->frame_index].size - aligned_size,
     };

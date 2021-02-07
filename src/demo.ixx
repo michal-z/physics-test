@@ -10,8 +10,6 @@ using namespace DirectX;
 using namespace DirectX::PackedVector;
 #include "cpp_hlsl_common.h"
 
-constexpr U32 num_msaa_samples = 1;
-
 struct MESH {
     U32 index_offset;
     U32 vertex_offset;
@@ -31,6 +29,7 @@ struct DEMO_STATE {
     VECTOR<MESH> meshes;
     VECTOR<RENDERABLE> renderables;
     graphics::PIPELINE_HANDLE mesh_pso;
+    graphics::PIPELINE_HANDLE physics_debug_pso;
     graphics::RESOURCE_HANDLE vertex_buffer;
     graphics::RESOURCE_HANDLE index_buffer;
     graphics::RESOURCE_HANDLE renderable_const_buffer;
@@ -116,11 +115,11 @@ bool Init_Demo_State(DEMO_STATE* demo) {
     if (!graphics::Init_Graphics(&demo->graphics, window)) {
         return false;
     }
+    graphics::GRAPHICS* gr = &demo->graphics;
+
     if (!physics::Init_Physics(&demo->physics)) {
         return false;
     }
-
-    graphics::GRAPHICS* gr = &demo->graphics;
 
     {
         const VECTOR<U8> vs = library::Load_File("data/shaders/mesh_vs_ps.vs.cso");
@@ -136,10 +135,39 @@ bool Init_Demo_State(DEMO_STATE* demo) {
             .NumRenderTargets = 1,
             .RTVFormats = { DXGI_FORMAT_R8G8B8A8_UNORM_SRGB },
             .DSVFormat = DXGI_FORMAT_D32_FLOAT,
-            .SampleDesc = { .Count = num_msaa_samples, .Quality = 0 },
+            .SampleDesc = { .Count = 1, .Quality = 0 },
         };
-        desc.RasterizerState.MultisampleEnable = num_msaa_samples > 1 ? TRUE : FALSE;
         demo->mesh_pso = graphics::Create_Graphics_Shader_Pipeline(gr, &desc);
+    }
+    {
+        const VECTOR<U8> vs = library::Load_File("data/shaders/physics_debug_vs_ps.vs.cso");
+        const VECTOR<U8> ps = library::Load_File("data/shaders/physics_debug_vs_ps.ps.cso");
+        D3D12_GRAPHICS_PIPELINE_STATE_DESC desc = {
+            .VS = { vs.data(), vs.size() },
+            .PS = { ps.data(), ps.size() },
+            .BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT),
+            .SampleMask = UINT32_MAX,
+            .RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT),
+            .DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT),
+            .PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_LINE,
+            .NumRenderTargets = 1,
+            .RTVFormats = { DXGI_FORMAT_R8G8B8A8_UNORM_SRGB },
+            .DSVFormat = DXGI_FORMAT_D32_FLOAT,
+            .SampleDesc = { .Count = 1, .Quality = 0 },
+        };
+        demo->physics_debug_pso = graphics::Create_Graphics_Shader_Pipeline(gr, &desc);
+    }
+
+    {
+        btCollisionShape* sphere_shape = new btSphereShape(1.0f);
+        btRigidBody::btRigidBodyConstructionInfo rb_info(
+            0.0f,
+            NULL,
+            sphere_shape,
+            btVector3(0.0f, 0.0f, 0.0f)
+        );
+        btRigidBody* body = new btRigidBody(rb_info);
+        demo->physics.world->addRigidBody(body);
     }
 
     VHR(gr->d2d.context->CreateSolidColorBrush({ 0.0f }, &demo->hud.brush));
@@ -260,7 +288,6 @@ bool Init_Demo_State(DEMO_STATE* demo) {
         );
         desc.MipLevels = 1;
         desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
-        desc.SampleDesc.Count = num_msaa_samples;
         demo->srgb_texture = graphics::Create_Committed_Resource(
             gr,
             D3D12_HEAP_TYPE_DEFAULT,
@@ -289,7 +316,6 @@ bool Init_Demo_State(DEMO_STATE* demo) {
         );
         desc.MipLevels = 1;
         desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL | D3D12_RESOURCE_FLAG_DENY_SHADER_RESOURCE;
-        desc.SampleDesc.Count = num_msaa_samples;
         demo->depth_texture = graphics::Create_Committed_Resource(
             gr,
             D3D12_HEAP_TYPE_DEFAULT,
@@ -312,7 +338,7 @@ bool Init_Demo_State(DEMO_STATE* demo) {
 
     graphics::Begin_Frame(gr);
 
-    library::Init_Gui_Context(&demo->gui, gr, num_msaa_samples);
+    library::Init_Gui_Context(&demo->gui, gr, 1);
 
     // Upload vertices.
     Upload_To_Gpu(gr, demo->vertex_buffer, &all_vertices, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
@@ -337,9 +363,9 @@ bool Init_Demo_State(DEMO_STATE* demo) {
 
 void Deinit_Demo_State(DEMO_STATE* demo) {
     assert(demo);
-    physics::Deinit_Physics(&demo->physics);
-
     graphics::GRAPHICS* gr = &demo->graphics;
+
+    physics::Deinit_Physics(&demo->physics);
     graphics::Finish_Gpu_Commands(gr);
     library::Deinit_Gui_Context(&demo->gui, gr);
     ImGui::DestroyContext();
@@ -351,6 +377,7 @@ void Deinit_Demo_State(DEMO_STATE* demo) {
     graphics::Release_Resource(gr, demo->srgb_texture);
     graphics::Release_Resource(gr, demo->depth_texture);
     graphics::Release_Pipeline(gr, demo->mesh_pso);
+    graphics::Release_Pipeline(gr, demo->physics_debug_pso);
     graphics::Deinit_Graphics(gr);
 }
 
@@ -439,11 +466,11 @@ void Update_Demo_State(DEMO_STATE* demo) {
 
     // Upload 'GLOBALS' data.
     {
-        const auto [cpu_addr, gpu_addr] = graphics::Allocate_Upload_Memory(gr, sizeof GLOBALS);
+        const auto [cpu_span, gpu_addr] = graphics::Allocate_Upload_Memory(gr, sizeof GLOBALS);
         glob_buffer_addr = gpu_addr;
 
         const XMMATRIX world_to_clip = camera_world_to_view * camera_view_to_clip;
-        GLOBALS* globals = (GLOBALS*)cpu_addr;
+        GLOBALS* globals = (GLOBALS*)cpu_span.data();
         XMStoreFloat4x4(&globals->world_to_clip, XMMatrixTranspose(world_to_clip));
     }
     // Upload 'RENDERABLE_CONSTANTS' data.
@@ -508,30 +535,34 @@ void Update_Demo_State(DEMO_STATE* demo) {
         gr->cmdlist->DrawInstanced(renderable->mesh.num_indices, 1, 0, 0);
     }
 
+    physics::PHYSICS* px = &demo->physics;
+    px->world->debugDrawWorld();
+    if (!px->debug->lines.empty()) {
+        const auto [cpu_span, gpu_addr] = graphics::Allocate_Upload_Memory(
+            gr,
+            (U32)(px->debug->lines.size() * sizeof DEBUG_VERTEX)
+        );
+        memcpy(cpu_span.data(), px->debug->lines.data(), cpu_span.size_bytes());
+
+        graphics::Set_Pipeline_State(gr, demo->physics_debug_pso);
+        gr->cmdlist->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_LINELIST);
+        gr->cmdlist->SetGraphicsRootConstantBufferView(0, glob_buffer_addr);
+        gr->cmdlist->SetGraphicsRootShaderResourceView(1, gpu_addr);
+        gr->cmdlist->DrawInstanced((U32)px->debug->lines.size(), 1, 0, 0);
+        px->debug->lines.clear();
+    }
+
     library::Draw_Gui(&demo->gui, gr);
 
     const auto [back_buffer, back_buffer_rtv] = graphics::Get_Back_Buffer(gr);
 
-    if constexpr (num_msaa_samples > 1) {
-        graphics::Add_Transition_Barrier(gr, back_buffer, D3D12_RESOURCE_STATE_RESOLVE_DEST);
-        graphics::Add_Transition_Barrier(gr, demo->srgb_texture, D3D12_RESOURCE_STATE_RESOLVE_SOURCE);
-        graphics::Flush_Resource_Barriers(gr);
-        gr->cmdlist->ResolveSubresource(
-            graphics::Get_Resource(gr, back_buffer),
-            0,
-            graphics::Get_Resource(gr, demo->srgb_texture),
-            0,
-            DXGI_FORMAT_R8G8B8A8_UNORM
-        );
-    } else {
-        graphics::Add_Transition_Barrier(gr, back_buffer, D3D12_RESOURCE_STATE_COPY_DEST);
-        graphics::Add_Transition_Barrier(gr, demo->srgb_texture, D3D12_RESOURCE_STATE_COPY_SOURCE);
-        graphics::Flush_Resource_Barriers(gr);
-        gr->cmdlist->CopyResource(
-            graphics::Get_Resource(gr, back_buffer),
-            graphics::Get_Resource(gr, demo->srgb_texture)
-        );
-    }
+    graphics::Add_Transition_Barrier(gr, back_buffer, D3D12_RESOURCE_STATE_COPY_DEST);
+    graphics::Add_Transition_Barrier(gr, demo->srgb_texture, D3D12_RESOURCE_STATE_COPY_SOURCE);
+    graphics::Flush_Resource_Barriers(gr);
+    gr->cmdlist->CopyResource(
+        graphics::Get_Resource(gr, back_buffer),
+        graphics::Get_Resource(gr, demo->srgb_texture)
+    );
     graphics::Add_Transition_Barrier(gr, back_buffer, D3D12_RESOURCE_STATE_RENDER_TARGET);
     graphics::Flush_Resource_Barriers(gr);
 

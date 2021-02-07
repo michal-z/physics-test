@@ -1,7 +1,7 @@
 module;
 #include "pch.h"
 export module physics;
-import graphics;
+import library;
 namespace physics {
 
 using namespace DirectX;
@@ -53,9 +53,6 @@ struct DEBUG_DRAW : public btIDebugDraw {
     virtual int getDebugMode() const override {
         return debug_mode;
     }
-    virtual void clearLines() override {
-        lines.clear();
-    }
 };
 
 export struct PHYSICS {
@@ -82,6 +79,7 @@ export bool Init_Physics(PHYSICS* px) {
     px->debug = new DEBUG_DRAW();
     px->debug->setDebugMode(btIDebugDraw::DBG_DrawWireframe);
     px->world->setDebugDrawer(px->debug);
+
     return true;
 }
 

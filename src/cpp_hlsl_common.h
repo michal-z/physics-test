@@ -1,3 +1,8 @@
+// HLSL needs '#pragma once' but C++ must not have it because of C++20 modules usage.
+#ifndef __cplusplus
+#pragma once
+#endif
+
 struct VERTEX {
     XMFLOAT3 position;
     XMFLOAT3 normal;

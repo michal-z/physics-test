@@ -455,9 +455,9 @@ export void Draw_Gui(IMGUI_CONTEXT* gui, graphics::GRAPHICS* gr) {
     graphics::Set_Pipeline_State(gr, gui->pso);
     // Update constant buffer.
     {
-        const auto [cpu_addr, gpu_addr] = graphics::Allocate_Upload_Memory(gr, sizeof XMFLOAT4X4A);
+        const auto [cpu_span, gpu_addr] = graphics::Allocate_Upload_Memory(gr, sizeof XMFLOAT4X4A);
         XMStoreFloat4x4A(
-            (XMFLOAT4X4A*)cpu_addr,
+            (XMFLOAT4X4A*)cpu_span.data(),
             XMMatrixTranspose(
                 XMMatrixOrthographicOffCenterLH(0.0f, (F32)vp_width, (F32)vp_height, 0.0f, 0.0f, 1.0f)
             )
