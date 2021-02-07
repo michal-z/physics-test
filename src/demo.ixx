@@ -95,9 +95,7 @@ template<typename T> void Upload_To_Gpu(
         gr,
         (U32)data->size()
     );
-    for (U32 i = 0; i < data->size(); ++i) {
-        span[i] = (*data)[i];
-    }
+    memcpy(span.data(), data->data(), span.size_bytes());
     gr->cmdlist->CopyBufferRegion(
         graphics::Get_Resource(gr, resource),
         0,
@@ -160,14 +158,10 @@ bool Init_Demo_State(DEMO_STATE* demo) {
 
     {
         btCollisionShape* sphere_shape = new btSphereShape(1.0f);
-        btRigidBody::btRigidBodyConstructionInfo rb_info(
-            0.0f,
-            NULL,
-            sphere_shape,
-            btVector3(0.0f, 0.0f, 0.0f)
-        );
-        btRigidBody* body = new btRigidBody(rb_info);
-        demo->physics.world->addRigidBody(body);
+        btCollisionObject* body = new btCollisionObject();
+
+        body->setCollisionShape(sphere_shape);
+        demo->physics.world->addCollisionObject(body);
     }
 
     VHR(gr->d2d.context->CreateSolidColorBrush({ 0.0f }, &demo->hud.brush));
