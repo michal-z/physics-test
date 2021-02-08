@@ -12,3 +12,4 @@ bin/imgui.ini
 *.ipdb
 *.iobj
 *.vcxproj.user
+*_bak*.hipnc
