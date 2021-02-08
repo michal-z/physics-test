@@ -1,5 +1,5 @@
 #include "pch.h"
-import demo;
+import game;
 
 // Used only by EASTL.
 void* operator new[](
@@ -46,7 +46,7 @@ void operator delete[](
 }
 
 int main() {
-    if (!demo::Run()) {
+    if (!game::Run()) {
         return 1;
     }
     return 0;

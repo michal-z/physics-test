@@ -4,7 +4,6 @@
     <ClCompile Include="..\src\graphics.ixx" />
     <ClCompile Include="..\src\library.ixx" />
     <ClCompile Include="..\src\main.cpp" />
-    <ClCompile Include="..\src\demo.ixx" />
     <ClCompile Include="..\src\external\EASTL\source\assert.cpp">
       <Filter>external\EASTL\source</Filter>
     </ClCompile>
@@ -65,6 +64,7 @@
       <Filter>external\Bullet</Filter>
     </ClCompile>
     <ClCompile Include="..\src\physics.ixx" />
+    <ClCompile Include="..\src\game.ixx" />
   </ItemGroup>
   <ItemGroup>
     <Filter Include="external">

@@ -1,10 +1,10 @@
 module;
 #include "pch.h"
-export module demo;
+export module game;
 import graphics;
 import physics;
 import library;
-namespace demo {
+namespace game {
 
 using namespace DirectX;
 using namespace DirectX::PackedVector;
@@ -21,7 +21,7 @@ struct RENDERABLE {
     XMFLOAT3 position;
 };
 
-struct DEMO_STATE {
+struct GAME {
     graphics::GRAPHICS graphics;
     physics::PHYSICS physics;
     library::FRAME_STATS frame_stats;
@@ -35,13 +35,22 @@ struct DEMO_STATE {
     graphics::RESOURCE_HANDLE renderable_const_buffer;
     graphics::RESOURCE_HANDLE srgb_texture;
     graphics::RESOURCE_HANDLE depth_texture;
-    graphics::RESOURCE_HANDLE ao_texture;
     D3D12_CPU_DESCRIPTOR_HANDLE vertex_buffer_srv;
     D3D12_CPU_DESCRIPTOR_HANDLE index_buffer_srv;
     D3D12_CPU_DESCRIPTOR_HANDLE renderable_const_buffer_srv;
     D3D12_CPU_DESCRIPTOR_HANDLE srgb_texture_rtv;
     D3D12_CPU_DESCRIPTOR_HANDLE depth_texture_dsv;
-    D3D12_CPU_DESCRIPTOR_HANDLE ao_texture_srv;
+    struct {
+        btTriangleIndexVertexArray* mesh_interface;
+        btBvhTriangleMeshShape* shape;
+        btCollisionObject* body;
+        graphics::RESOURCE_HANDLE ao_texture;
+        D3D12_CPU_DESCRIPTOR_HANDLE ao_texture_srv;
+    } level;
+    struct {
+        btSphereShape* shape;
+        btCollisionObject* body;
+    } player;
     struct {
         ID2D1_SOLID_COLOR_BRUSH* brush;
         IDWRITE_TEXT_FORMAT* text_format;
@@ -61,7 +70,8 @@ void Add_Mesh(
     const CHAR* filename,
     VECTOR<MESH>* meshes,
     VECTOR<VERTEX>* all_vertices,
-    VECTOR<U32>* all_indices
+    VECTOR<U32>* all_indices,
+    btIndexedMesh* physics_mesh
 ) {
     assert(filename && meshes && all_vertices && all_indices);
 
@@ -72,6 +82,20 @@ void Add_Mesh(
     VECTOR<U32> indices;
     library::Load_Mesh(filename, &indices, &positions, &normals, &uvs, &tangents);
     assert(!normals.empty() && !uvs.empty() && !tangents.empty());
+
+    if (physics_mesh) {
+        U8* index_base = (U8*)btAlignedAlloc(indices.size() * sizeof U32, 16);
+        U8* vertex_base = (U8*)btAlignedAlloc(positions.size() * sizeof XMFLOAT3, 16);
+        memcpy(index_base, indices.data(), indices.size() * sizeof U32);
+        memcpy(vertex_base, positions.data(), positions.size() * sizeof XMFLOAT3);
+
+        physics_mesh->m_numTriangles = (S32)(indices.size() / 3);
+        physics_mesh->m_triangleIndexBase = index_base;
+        physics_mesh->m_triangleIndexStride = 3 * sizeof U32;
+        physics_mesh->m_numVertices = (S32)positions.size();
+        physics_mesh->m_vertexBase = vertex_base;
+        physics_mesh->m_vertexStride = sizeof XMFLOAT3;
+    }
 
     VECTOR<VERTEX> vertices(positions.size());
     for (U32 i = 0; i < vertices.size(); ++i) {
@@ -90,15 +114,15 @@ void Create_And_Upload_Texture(
     const WCHAR* filename,
     graphics::GRAPHICS* gr,
     library::MIPMAP_GENERATOR* mipgen,
-    graphics::RESOURCE_HANDLE* texture,
-    D3D12_CPU_DESCRIPTOR_HANDLE* texture_srv
+    graphics::RESOURCE_HANDLE* out_texture,
+    D3D12_CPU_DESCRIPTOR_HANDLE* out_texture_srv
 ) {
-    assert(filename && gr && mipgen && texture && texture_srv);
+    assert(filename && gr && mipgen && out_texture && out_texture_srv);
     const auto [tex, srv] = graphics::Create_Texture_From_File(gr, filename);
     library::Generate_Mipmaps(mipgen, gr, tex);
     graphics::Add_Transition_Barrier(gr, tex, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-    *texture = tex;
-    *texture_srv = srv;
+    *out_texture = tex;
+    *out_texture_srv = srv;
 }
 
 template<typename T> void Upload_To_Gpu(
@@ -123,16 +147,16 @@ template<typename T> void Upload_To_Gpu(
     graphics::Add_Transition_Barrier(gr, resource, state);
 }
 
-bool Init_Demo_State(DEMO_STATE* demo) {
-    assert(demo);
+bool Init_Game(GAME* game) {
+    assert(game);
 
-    const HWND window = library::Create_Window("demo", 1920, 1080, /* init_imgui */ true);
-    if (!graphics::Init_Graphics(&demo->graphics, window)) {
+    const HWND window = library::Create_Window("game", 1920, 1080, /* init_imgui */ true);
+    if (!graphics::Init_Graphics(&game->graphics, window)) {
         return false;
     }
-    graphics::GRAPHICS* gr = &demo->graphics;
+    graphics::GRAPHICS* gr = &game->graphics;
 
-    if (!physics::Init_Physics(&demo->physics)) {
+    if (!physics::Init_Physics(&game->physics)) {
         return false;
     }
 
@@ -153,7 +177,7 @@ bool Init_Demo_State(DEMO_STATE* demo) {
             .SampleDesc = { .Count = 1, .Quality = 0 },
         };
         //desc.RasterizerState.FillMode = D3D12_FILL_MODE_WIREFRAME;
-        demo->mesh_pso = graphics::Create_Graphics_Shader_Pipeline(gr, &desc);
+        game->mesh_pso = graphics::Create_Graphics_Shader_Pipeline(gr, &desc);
     }
     {
         const VECTOR<U8> vs = library::Load_File("data/shaders/physics_debug_vs_ps.vs.cso");
@@ -171,25 +195,23 @@ bool Init_Demo_State(DEMO_STATE* demo) {
             .DSVFormat = DXGI_FORMAT_D32_FLOAT,
             .SampleDesc = { .Count = 1, .Quality = 0 },
         };
-        demo->physics_debug_pso = graphics::Create_Graphics_Shader_Pipeline(gr, &desc);
+        game->physics_debug_pso = graphics::Create_Graphics_Shader_Pipeline(gr, &desc);
     }
 
     {
-        btCollisionShape* sphere_shape = new btSphereShape(0.5f);
-
         btTransform ground_transform;
         ground_transform.setIdentity();
         ground_transform.setOrigin(btVector3(0.5f, 0.5f, -0.5f));
 
-        btCollisionObject* body = new btCollisionObject();
-        body->setCollisionShape(sphere_shape);
-        body->setWorldTransform(ground_transform);
-
-        demo->physics.world->addCollisionObject(body);
+        game->player.shape = new btSphereShape(0.5f);
+        game->player.body = new btCollisionObject();
+        game->player.body->setCollisionShape(game->player.shape);
+        game->player.body->setWorldTransform(ground_transform);
+        game->physics.world->addCollisionObject(game->player.body);
     }
 
-    VHR(gr->d2d.context->CreateSolidColorBrush({ 0.0f }, &demo->hud.brush));
-    demo->hud.brush->SetColor({ .r = 1.0f, .g = 1.0f, .b = 1.0f, .a = 1.0f });
+    VHR(gr->d2d.context->CreateSolidColorBrush({ 0.0f }, &game->hud.brush));
+    game->hud.brush->SetColor({ .r = 1.0f, .g = 1.0f, .b = 1.0f, .a = 1.0f });
 
     VHR(gr->d2d.factory_dwrite->CreateTextFormat(
         L"Verdana",
@@ -199,26 +221,35 @@ bool Init_Demo_State(DEMO_STATE* demo) {
         DWRITE_FONT_STRETCH_NORMAL,
         32.0f,
         L"en-us",
-        &demo->hud.text_format
+        &game->hud.text_format
     ));
-    VHR(demo->hud.text_format->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING));
-    VHR(demo->hud.text_format->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR));
+    VHR(game->hud.text_format->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING));
+    VHR(game->hud.text_format->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR));
 
     VECTOR<VERTEX> all_vertices;
     VECTOR<U32> all_indices;
     {
+        btIndexedMesh physics_mesh = {};
+        Add_Mesh("data/level1_collision.gltf", &game->meshes, &all_vertices, &all_indices, &physics_mesh);
+
+        game->level.mesh_interface = new btTriangleIndexVertexArray();
+        game->level.mesh_interface->addIndexedMesh(physics_mesh);
+        game->level.shape = new btBvhTriangleMeshShape(game->level.mesh_interface, true);
+        game->level.body = new btCollisionObject();
+        game->level.body->setCollisionShape(game->level.shape);
+        game->physics.world->addCollisionObject(game->level.body);
+
         const CHAR* mesh_paths[] = {
-            "data/level1_collision.gltf",
             "data/cube.gltf",
         };
         for (U32 i = 0; i < eastl::size(mesh_paths); ++i) {
-            Add_Mesh(mesh_paths[i], &demo->meshes, &all_vertices, &all_indices);
+            Add_Mesh(mesh_paths[i], &game->meshes, &all_vertices, &all_indices, NULL);
         }
     }
-    demo->renderables.push_back({ .mesh = demo->meshes[0], .position = { 0.0f, 0.0f, 0.0f } });
+    game->renderables.push_back({ .mesh = game->meshes[0], .position = { 0.0f, 0.0f, 0.0f } });
 
     // Create one global vertex buffer for all static geometry.
-    demo->vertex_buffer = graphics::Create_Committed_Resource(
+    game->vertex_buffer = graphics::Create_Committed_Resource(
         gr,
         D3D12_HEAP_TYPE_DEFAULT,
         D3D12_HEAP_FLAG_NONE,
@@ -226,13 +257,13 @@ bool Init_Demo_State(DEMO_STATE* demo) {
         D3D12_RESOURCE_STATE_COPY_DEST,
         NULL
     );
-    demo->vertex_buffer_srv = graphics::Allocate_Cpu_Descriptors(
+    game->vertex_buffer_srv = graphics::Allocate_Cpu_Descriptors(
         gr,
         D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
         1
     );
     gr->device->CreateShaderResourceView(
-        graphics::Get_Resource(gr, demo->vertex_buffer),
+        graphics::Get_Resource(gr, game->vertex_buffer),
         Get_Const_Ptr<D3D12_SHADER_RESOURCE_VIEW_DESC>({
             .ViewDimension = D3D12_SRV_DIMENSION_BUFFER,
             .Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
@@ -242,10 +273,10 @@ bool Init_Demo_State(DEMO_STATE* demo) {
                 .StructureByteStride = sizeof VERTEX,
             }
         }),
-        demo->vertex_buffer_srv
+        game->vertex_buffer_srv
     );
     // Create one global index buffer for all static geometry.
-    demo->index_buffer = graphics::Create_Committed_Resource(
+    game->index_buffer = graphics::Create_Committed_Resource(
         gr,
         D3D12_HEAP_TYPE_DEFAULT,
         D3D12_HEAP_FLAG_NONE,
@@ -253,49 +284,49 @@ bool Init_Demo_State(DEMO_STATE* demo) {
         D3D12_RESOURCE_STATE_COPY_DEST,
         NULL
     );
-    demo->index_buffer_srv = graphics::Allocate_Cpu_Descriptors(
+    game->index_buffer_srv = graphics::Allocate_Cpu_Descriptors(
         gr,
         D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
         1
     );
     gr->device->CreateShaderResourceView(
-        graphics::Get_Resource(gr, demo->index_buffer),
+        graphics::Get_Resource(gr, game->index_buffer),
         Get_Const_Ptr<D3D12_SHADER_RESOURCE_VIEW_DESC>({
             .Format = DXGI_FORMAT_R32_UINT,
             .ViewDimension = D3D12_SRV_DIMENSION_BUFFER,
             .Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
             .Buffer = { .NumElements = (U32)all_indices.size() },
         }),
-        demo->index_buffer_srv
+        game->index_buffer_srv
     );
     // Create structured buffer containing constants for each renderable object.
-    demo->renderable_const_buffer = graphics::Create_Committed_Resource(
+    game->renderable_const_buffer = graphics::Create_Committed_Resource(
         gr,
         D3D12_HEAP_TYPE_DEFAULT,
         D3D12_HEAP_FLAG_NONE,
         Get_Const_Ptr(
-            CD3DX12_RESOURCE_DESC::Buffer(demo->renderables.size() * sizeof RENDERABLE_CONSTANTS)
+            CD3DX12_RESOURCE_DESC::Buffer(game->renderables.size() * sizeof RENDERABLE_CONSTANTS)
         ),
         D3D12_RESOURCE_STATE_COPY_DEST,
         NULL
     );
-    demo->renderable_const_buffer_srv = graphics::Allocate_Cpu_Descriptors(
+    game->renderable_const_buffer_srv = graphics::Allocate_Cpu_Descriptors(
         gr,
         D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
         1
     );
     gr->device->CreateShaderResourceView(
-        graphics::Get_Resource(gr, demo->renderable_const_buffer),
+        graphics::Get_Resource(gr, game->renderable_const_buffer),
         Get_Const_Ptr<D3D12_SHADER_RESOURCE_VIEW_DESC>({
             .ViewDimension = D3D12_SRV_DIMENSION_BUFFER,
             .Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
             .Buffer = {
                 .FirstElement = 0,
-                .NumElements = (U32)demo->renderables.size(),
+                .NumElements = (U32)game->renderables.size(),
                 .StructureByteStride = sizeof RENDERABLE_CONSTANTS,
             }
         }),
-        demo->renderable_const_buffer_srv
+        game->renderable_const_buffer_srv
     );
 
     // Create srgb color texture.
@@ -307,7 +338,7 @@ bool Init_Demo_State(DEMO_STATE* demo) {
         );
         desc.MipLevels = 1;
         desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
-        demo->srgb_texture = graphics::Create_Committed_Resource(
+        game->srgb_texture = graphics::Create_Committed_Resource(
             gr,
             D3D12_HEAP_TYPE_DEFAULT,
             D3D12_HEAP_FLAG_NONE,
@@ -315,15 +346,15 @@ bool Init_Demo_State(DEMO_STATE* demo) {
             D3D12_RESOURCE_STATE_RENDER_TARGET,
             Get_Const_Ptr(CD3DX12_CLEAR_VALUE(desc.Format, XMVECTORF32{ 0.0f, 0.0f, 0.0f, 1.0f }))
         );
-        demo->srgb_texture_rtv = graphics::Allocate_Cpu_Descriptors(
+        game->srgb_texture_rtv = graphics::Allocate_Cpu_Descriptors(
             gr,
             D3D12_DESCRIPTOR_HEAP_TYPE_RTV,
             1
         );
         gr->device->CreateRenderTargetView(
-            graphics::Get_Resource(gr, demo->srgb_texture),
+            graphics::Get_Resource(gr, game->srgb_texture),
             NULL,
-            demo->srgb_texture_rtv
+            game->srgb_texture_rtv
         );
     }
     // Create depth texture.
@@ -335,7 +366,7 @@ bool Init_Demo_State(DEMO_STATE* demo) {
         );
         desc.MipLevels = 1;
         desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL | D3D12_RESOURCE_FLAG_DENY_SHADER_RESOURCE;
-        demo->depth_texture = graphics::Create_Committed_Resource(
+        game->depth_texture = graphics::Create_Committed_Resource(
             gr,
             D3D12_HEAP_TYPE_DEFAULT,
             D3D12_HEAP_FLAG_NONE,
@@ -343,15 +374,15 @@ bool Init_Demo_State(DEMO_STATE* demo) {
             D3D12_RESOURCE_STATE_DEPTH_WRITE,
             Get_Const_Ptr(CD3DX12_CLEAR_VALUE(desc.Format, 1.0f, 0))
         );
-        demo->depth_texture_dsv = graphics::Allocate_Cpu_Descriptors(
+        game->depth_texture_dsv = graphics::Allocate_Cpu_Descriptors(
             gr,
             D3D12_DESCRIPTOR_HEAP_TYPE_DSV,
             1
         );
         gr->device->CreateDepthStencilView(
-            graphics::Get_Resource(gr, demo->depth_texture),
+            graphics::Get_Resource(gr, game->depth_texture),
             NULL,
-            demo->depth_texture_dsv
+            game->depth_texture_dsv
         );
     }
 
@@ -360,21 +391,21 @@ bool Init_Demo_State(DEMO_STATE* demo) {
 
     graphics::Begin_Frame(gr);
 
-    library::Init_Gui_Context(&demo->gui, gr, 1);
+    library::Init_Gui_Context(&game->gui, gr, 1);
 
     Create_And_Upload_Texture(
         L"data/level1_collision_ao.png",
         gr,
         &mipgen_rgba8,
-        &demo->ao_texture,
-        &demo->ao_texture_srv
+        &game->level.ao_texture,
+        &game->level.ao_texture_srv
     );
 
     // Upload vertices.
-    Upload_To_Gpu(gr, demo->vertex_buffer, &all_vertices, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+    Upload_To_Gpu(gr, game->vertex_buffer, &all_vertices, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
 
     // Upload indices.
-    Upload_To_Gpu(gr, demo->index_buffer, &all_indices, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+    Upload_To_Gpu(gr, game->index_buffer, &all_indices, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
 
     // Flush commands and wait for GPU to complete them.
     graphics::Flush_Gpu_Commands(gr);
@@ -382,61 +413,72 @@ bool Init_Demo_State(DEMO_STATE* demo) {
 
     library::Deinit_Mipmap_Generator(&mipgen_rgba8, gr);
 
-    library::Init_Frame_Stats(&demo->frame_stats);
+    library::Init_Frame_Stats(&game->frame_stats);
 
-    demo->camera = {
+    game->camera = {
         .position = XMFLOAT3(0.0f, 8.0f, -13.2f),
         .pitch = 0.0f,
         .yaw = 0.0f,
     };
-    demo->mouse = { .cursor_prev_x = 0, .cursor_prev_y = 0 };
+    game->mouse = { .cursor_prev_x = 0, .cursor_prev_y = 0 };
     return true;
 }
 
-void Deinit_Demo_State(DEMO_STATE* demo) {
-    assert(demo);
-    graphics::GRAPHICS* gr = &demo->graphics;
-
-    physics::Deinit_Physics(&demo->physics);
+void Deinit_Game(GAME* game) {
+    assert(game);
+    graphics::GRAPHICS* gr = &game->graphics;
     graphics::Finish_Gpu_Commands(gr);
-    library::Deinit_Gui_Context(&demo->gui, gr);
+
+    game->physics.world->removeCollisionObject(game->level.body);
+    game->physics.world->removeCollisionObject(game->player.body);
+
+    btAlignedFree((void*)game->level.mesh_interface->getIndexedMeshArray()[0].m_vertexBase);
+    btAlignedFree((void*)game->level.mesh_interface->getIndexedMeshArray()[0].m_triangleIndexBase);
+    delete game->level.mesh_interface;
+    delete game->level.shape;
+    delete game->level.body;
+    delete game->player.shape;
+    delete game->player.body;
+
+    physics::Deinit_Physics(&game->physics);
+    library::Deinit_Gui_Context(&game->gui, gr);
     ImGui::DestroyContext();
-    MZ_SAFE_RELEASE(demo->hud.brush);
-    MZ_SAFE_RELEASE(demo->hud.text_format);
-    graphics::Release_Resource(gr, demo->vertex_buffer);
-    graphics::Release_Resource(gr, demo->index_buffer);
-    graphics::Release_Resource(gr, demo->renderable_const_buffer);
-    graphics::Release_Resource(gr, demo->srgb_texture);
-    graphics::Release_Resource(gr, demo->depth_texture);
-    graphics::Release_Resource(gr, demo->ao_texture);
-    graphics::Release_Pipeline(gr, demo->mesh_pso);
-    graphics::Release_Pipeline(gr, demo->physics_debug_pso);
+    MZ_SAFE_RELEASE(game->hud.brush);
+    MZ_SAFE_RELEASE(game->hud.text_format);
+    graphics::Release_Resource(gr, game->vertex_buffer);
+    graphics::Release_Resource(gr, game->index_buffer);
+    graphics::Release_Resource(gr, game->renderable_const_buffer);
+    graphics::Release_Resource(gr, game->srgb_texture);
+    graphics::Release_Resource(gr, game->depth_texture);
+    graphics::Release_Resource(gr, game->level.ao_texture);
+    graphics::Release_Pipeline(gr, game->mesh_pso);
+    graphics::Release_Pipeline(gr, game->physics_debug_pso);
     graphics::Deinit_Graphics(gr);
 }
 
-void Update_Demo_State(DEMO_STATE* demo) {
-    assert(demo);
+void Update_Game(GAME* game) {
+    assert(game);
 
-    graphics::GRAPHICS* gr = &demo->graphics;
+    graphics::GRAPHICS* gr = &game->graphics;
 
-    library::Update_Frame_Stats(&demo->frame_stats);
-    library::Update_Gui(demo->frame_stats.delta_time);
+    library::Update_Frame_Stats(&game->frame_stats);
+    library::Update_Gui(game->frame_stats.delta_time);
 
     // Handle camera rotation with mouse.
     {
         POINT pos = {};
         GetCursorPos(&pos);
-        const F32 delta_x = (F32)pos.x - demo->mouse.cursor_prev_x;
-        const F32 delta_y = (F32)pos.y - demo->mouse.cursor_prev_y;
-        demo->mouse.cursor_prev_x = pos.x;
-        demo->mouse.cursor_prev_y = pos.y;
+        const F32 delta_x = (F32)pos.x - game->mouse.cursor_prev_x;
+        const F32 delta_y = (F32)pos.y - game->mouse.cursor_prev_y;
+        game->mouse.cursor_prev_x = pos.x;
+        game->mouse.cursor_prev_y = pos.y;
 
         if (GetAsyncKeyState(VK_RBUTTON) < 0) {
-            demo->camera.pitch += 0.0025f * delta_y;
-            demo->camera.yaw += 0.0025f * delta_x;
-            demo->camera.pitch = XMMin(demo->camera.pitch, 0.48f * XM_PI);
-            demo->camera.pitch = XMMax(demo->camera.pitch, -0.48f * XM_PI);
-            demo->camera.yaw = XMScalarModAngle(demo->camera.yaw);
+            game->camera.pitch += 0.0025f * delta_y;
+            game->camera.yaw += 0.0025f * delta_x;
+            game->camera.pitch = XMMin(game->camera.pitch, 0.48f * XM_PI);
+            game->camera.pitch = XMMax(game->camera.pitch, -0.48f * XM_PI);
+            game->camera.yaw = XMScalarModAngle(game->camera.yaw);
         }
     }
     // Handle camera movement with 'WASD' keys.
@@ -449,9 +491,9 @@ void Update_Demo_State(DEMO_STATE* demo) {
     XMMATRIX camera_world_to_view = {};
     {
         const F32 speed = 5.0f;
-        const F32 delta_time = demo->frame_stats.delta_time;
-        const XMMATRIX transform = XMMatrixRotationX(demo->camera.pitch) *
-            XMMatrixRotationY(demo->camera.yaw);
+        const F32 delta_time = game->frame_stats.delta_time;
+        const XMMATRIX transform = XMMatrixRotationX(game->camera.pitch) *
+            XMMatrixRotationY(game->camera.yaw);
         XMVECTOR forward = XMVector3Normalize(
             XMVector3Transform(XMVectorSet(0.0f, 0.0f, 1.0f, 0.0f), transform)
         );
@@ -461,21 +503,21 @@ void Update_Demo_State(DEMO_STATE* demo) {
         forward = speed * delta_time * forward;
 
         if (GetAsyncKeyState('W') < 0) {
-            const XMVECTOR newpos = XMLoadFloat3(&demo->camera.position) + forward;
-            XMStoreFloat3(&demo->camera.position, newpos);
+            const XMVECTOR newpos = XMLoadFloat3(&game->camera.position) + forward;
+            XMStoreFloat3(&game->camera.position, newpos);
         } else if (GetAsyncKeyState('S') < 0) {
-            const XMVECTOR newpos = XMLoadFloat3(&demo->camera.position) - forward;
-            XMStoreFloat3(&demo->camera.position, newpos);
+            const XMVECTOR newpos = XMLoadFloat3(&game->camera.position) - forward;
+            XMStoreFloat3(&game->camera.position, newpos);
         }
         if (GetAsyncKeyState('D') < 0) {
-            const XMVECTOR newpos = XMLoadFloat3(&demo->camera.position) + right;
-            XMStoreFloat3(&demo->camera.position, newpos);
+            const XMVECTOR newpos = XMLoadFloat3(&game->camera.position) + right;
+            XMStoreFloat3(&game->camera.position, newpos);
         } else if (GetAsyncKeyState('A') < 0) {
-            const XMVECTOR newpos = XMLoadFloat3(&demo->camera.position) - right;
-            XMStoreFloat3(&demo->camera.position, newpos);
+            const XMVECTOR newpos = XMLoadFloat3(&game->camera.position) - right;
+            XMStoreFloat3(&game->camera.position, newpos);
         }
         camera_world_to_view = XMMatrixLookToLH(
-            XMLoadFloat3(&demo->camera.position),
+            XMLoadFloat3(&game->camera.position),
             forward,
             XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f)
         );
@@ -483,13 +525,13 @@ void Update_Demo_State(DEMO_STATE* demo) {
 
     graphics::Begin_Frame(gr);
 
-    graphics::Add_Transition_Barrier(gr, demo->srgb_texture, D3D12_RESOURCE_STATE_RENDER_TARGET);
+    graphics::Add_Transition_Barrier(gr, game->srgb_texture, D3D12_RESOURCE_STATE_RENDER_TARGET);
     graphics::Flush_Resource_Barriers(gr);
 
-    gr->cmdlist->OMSetRenderTargets(1, &demo->srgb_texture_rtv, TRUE, &demo->depth_texture_dsv);
-    gr->cmdlist->ClearDepthStencilView(demo->depth_texture_dsv, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, NULL);
+    gr->cmdlist->OMSetRenderTargets(1, &game->srgb_texture_rtv, TRUE, &game->depth_texture_dsv);
+    gr->cmdlist->ClearDepthStencilView(game->depth_texture_dsv, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, NULL);
     gr->cmdlist->ClearRenderTargetView(
-        demo->srgb_texture_rtv,
+        game->srgb_texture_rtv,
         XMVECTORF32{ 0.0f, 0.0f, 0.0f, 1.0f },
         0,
         NULL
@@ -510,24 +552,24 @@ void Update_Demo_State(DEMO_STATE* demo) {
     {
         graphics::Add_Transition_Barrier(
             gr,
-            demo->renderable_const_buffer,
+            game->renderable_const_buffer,
             D3D12_RESOURCE_STATE_COPY_DEST
         );
         graphics::Flush_Resource_Barriers(gr);
         const auto [span, buffer, buffer_offset] =
             graphics::Allocate_Upload_Buffer_Region<RENDERABLE_CONSTANTS>(
                 gr,
-                (U32)demo->renderables.size()
+                (U32)game->renderables.size()
             );
-        for (U32 i = 0; i < demo->renderables.size(); ++i) {
-            const XMVECTOR pos = XMLoadFloat3(&demo->renderables[i].position);
+        for (U32 i = 0; i < game->renderables.size(); ++i) {
+            const XMVECTOR pos = XMLoadFloat3(&game->renderables[i].position);
             XMStoreFloat4x4(
                 &span[i].object_to_world,
                 XMMatrixTranspose(XMMatrixTranslationFromVector(pos))
             );
         }
         gr->cmdlist->CopyBufferRegion(
-            graphics::Get_Resource(gr, demo->renderable_const_buffer),
+            graphics::Get_Resource(gr, game->renderable_const_buffer),
             0,
             buffer,
             buffer_offset,
@@ -535,7 +577,7 @@ void Update_Demo_State(DEMO_STATE* demo) {
         );
         graphics::Add_Transition_Barrier(
             gr,
-            demo->renderable_const_buffer,
+            game->renderable_const_buffer,
             D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE
         );
         graphics::Flush_Resource_Barriers(gr);
@@ -544,21 +586,21 @@ void Update_Demo_State(DEMO_STATE* demo) {
     const D3D12_GPU_DESCRIPTOR_HANDLE buffer_table_base = graphics::Copy_Descriptors_To_Gpu_Heap(
         gr,
         1,
-        demo->vertex_buffer_srv
+        game->vertex_buffer_srv
     );
-    graphics::Copy_Descriptors_To_Gpu_Heap(gr, 1, demo->index_buffer_srv);
-    graphics::Copy_Descriptors_To_Gpu_Heap(gr, 1, demo->renderable_const_buffer_srv);
+    graphics::Copy_Descriptors_To_Gpu_Heap(gr, 1, game->index_buffer_srv);
+    graphics::Copy_Descriptors_To_Gpu_Heap(gr, 1, game->renderable_const_buffer_srv);
 
-    graphics::Set_Pipeline_State(gr, demo->mesh_pso);
+    graphics::Set_Pipeline_State(gr, game->mesh_pso);
     gr->cmdlist->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     gr->cmdlist->SetGraphicsRootConstantBufferView(1, glob_buffer_addr);
     gr->cmdlist->SetGraphicsRootDescriptorTable(2, buffer_table_base);
     gr->cmdlist->SetGraphicsRootDescriptorTable(
         3,
-        graphics::Copy_Descriptors_To_Gpu_Heap(gr, 1, demo->ao_texture_srv)
+        graphics::Copy_Descriptors_To_Gpu_Heap(gr, 1, game->level.ao_texture_srv)
     );
-    for (U32 i = 0; i < demo->renderables.size(); ++i) {
-        const RENDERABLE* renderable = &demo->renderables[i];
+    for (U32 i = 0; i < game->renderables.size(); ++i) {
+        const RENDERABLE* renderable = &game->renderables[i];
         gr->cmdlist->SetGraphicsRoot32BitConstants(
             0,
             3,
@@ -572,7 +614,7 @@ void Update_Demo_State(DEMO_STATE* demo) {
         gr->cmdlist->DrawInstanced(renderable->mesh.num_indices, 1, 0, 0);
     }
 
-    physics::PHYSICS* px = &demo->physics;
+    physics::PHYSICS* px = &game->physics;
     px->world->debugDrawWorld();
     if (!px->debug->lines.empty()) {
         const auto [cpu_span, gpu_addr] = graphics::Allocate_Upload_Memory(
@@ -581,7 +623,7 @@ void Update_Demo_State(DEMO_STATE* demo) {
         );
         memcpy(cpu_span.data(), px->debug->lines.data(), cpu_span.size_bytes());
 
-        graphics::Set_Pipeline_State(gr, demo->physics_debug_pso);
+        graphics::Set_Pipeline_State(gr, game->physics_debug_pso);
         gr->cmdlist->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_LINELIST);
         gr->cmdlist->SetGraphicsRootConstantBufferView(0, glob_buffer_addr);
         gr->cmdlist->SetGraphicsRootShaderResourceView(1, gpu_addr);
@@ -589,16 +631,16 @@ void Update_Demo_State(DEMO_STATE* demo) {
         px->debug->lines.clear();
     }
 
-    library::Draw_Gui(&demo->gui, gr);
+    library::Draw_Gui(&game->gui, gr);
 
     const auto [back_buffer, back_buffer_rtv] = graphics::Get_Back_Buffer(gr);
 
     graphics::Add_Transition_Barrier(gr, back_buffer, D3D12_RESOURCE_STATE_COPY_DEST);
-    graphics::Add_Transition_Barrier(gr, demo->srgb_texture, D3D12_RESOURCE_STATE_COPY_SOURCE);
+    graphics::Add_Transition_Barrier(gr, game->srgb_texture, D3D12_RESOURCE_STATE_COPY_SOURCE);
     graphics::Flush_Resource_Barriers(gr);
     gr->cmdlist->CopyResource(
         graphics::Get_Resource(gr, back_buffer),
-        graphics::Get_Resource(gr, demo->srgb_texture)
+        graphics::Get_Resource(gr, game->srgb_texture)
     );
     graphics::Add_Transition_Barrier(gr, back_buffer, D3D12_RESOURCE_STATE_RENDER_TARGET);
     graphics::Flush_Resource_Barriers(gr);
@@ -610,22 +652,22 @@ void Update_Demo_State(DEMO_STATE* demo) {
             text,
             eastl::size(text),
             L"FPS: %.1f\nFrame time: %.3f ms",
-            demo->frame_stats.fps,
-            demo->frame_stats.average_cpu_time
+            game->frame_stats.fps,
+            game->frame_stats.average_cpu_time
         );
         assert(len > 0);
 
         gr->d2d.context->DrawText(
             text,
             len,
-            demo->hud.text_format,
+            game->hud.text_format,
             D2D1_RECT_F{
                 .left = 4.0f,
                 .top = 4.0f,
                 .right = (F32)gr->viewport_width,
                 .bottom = (F32)gr->viewport_height,
             },
-            demo->hud.brush
+            game->hud.brush
         );
     }
     graphics::End_Draw_2D(gr);
@@ -636,8 +678,8 @@ void Update_Demo_State(DEMO_STATE* demo) {
 export bool Run() {
     SetProcessDPIAware();
 
-    DEMO_STATE demo = {};
-    if (!Init_Demo_State(&demo)) {
+    GAME game = {};
+    if (!Init_Game(&game)) {
         return false;
     }
 
@@ -649,12 +691,12 @@ export bool Run() {
                 break;
             }
         } else {
-            Update_Demo_State(&demo);
+            Update_Game(&game);
         }
     }
 
-    Deinit_Demo_State(&demo);
+    Deinit_Game(&game);
     return true;
 }
 
-} // namespace demo
+} // namespace game
