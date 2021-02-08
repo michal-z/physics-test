@@ -576,6 +576,7 @@ export void Generate_Mipmaps(
     graphics::RESOURCE_HANDLE texture
 ) {
     assert(mipgen && gr);
+    assert(mipgen->format != DXGI_FORMAT_UNKNOWN);
     const D3D12_RESOURCE_DESC texture_desc = graphics::Get_Resource_Desc(gr, texture);
     assert(mipgen->format == texture_desc.Format);
     assert(texture_desc.Width <= 2048 && texture_desc.Height <= 2048);

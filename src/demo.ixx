@@ -35,11 +35,13 @@ struct DEMO_STATE {
     graphics::RESOURCE_HANDLE renderable_const_buffer;
     graphics::RESOURCE_HANDLE srgb_texture;
     graphics::RESOURCE_HANDLE depth_texture;
+    graphics::RESOURCE_HANDLE ao_texture;
     D3D12_CPU_DESCRIPTOR_HANDLE vertex_buffer_srv;
     D3D12_CPU_DESCRIPTOR_HANDLE index_buffer_srv;
     D3D12_CPU_DESCRIPTOR_HANDLE renderable_const_buffer_srv;
     D3D12_CPU_DESCRIPTOR_HANDLE srgb_texture_rtv;
     D3D12_CPU_DESCRIPTOR_HANDLE depth_texture_dsv;
+    D3D12_CPU_DESCRIPTOR_HANDLE ao_texture_srv;
     struct {
         ID2D1_SOLID_COLOR_BRUSH* brush;
         IDWRITE_TEXT_FORMAT* text_format;
@@ -82,6 +84,21 @@ void Add_Mesh(
     });
     all_vertices->insert(all_vertices->end(), vertices.begin(), vertices.end());
     all_indices->insert(all_indices->end(), indices.begin(), indices.end());
+}
+
+void Create_And_Upload_Texture(
+    const WCHAR* filename,
+    graphics::GRAPHICS* gr,
+    library::MIPMAP_GENERATOR* mipgen,
+    graphics::RESOURCE_HANDLE* texture,
+    D3D12_CPU_DESCRIPTOR_HANDLE* texture_srv
+) {
+    assert(filename && gr && mipgen && texture && texture_srv);
+    const auto [tex, srv] = graphics::Create_Texture_From_File(gr, filename);
+    library::Generate_Mipmaps(mipgen, gr, tex);
+    graphics::Add_Transition_Barrier(gr, tex, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+    *texture = tex;
+    *texture_srv = srv;
 }
 
 template<typename T> void Upload_To_Gpu(
@@ -135,6 +152,7 @@ bool Init_Demo_State(DEMO_STATE* demo) {
             .DSVFormat = DXGI_FORMAT_D32_FLOAT,
             .SampleDesc = { .Count = 1, .Quality = 0 },
         };
+        //desc.RasterizerState.FillMode = D3D12_FILL_MODE_WIREFRAME;
         demo->mesh_pso = graphics::Create_Graphics_Shader_Pipeline(gr, &desc);
     }
     {
@@ -157,10 +175,16 @@ bool Init_Demo_State(DEMO_STATE* demo) {
     }
 
     {
-        btCollisionShape* sphere_shape = new btSphereShape(1.0f);
-        btCollisionObject* body = new btCollisionObject();
+        btCollisionShape* sphere_shape = new btSphereShape(0.5f);
 
+        btTransform ground_transform;
+        ground_transform.setIdentity();
+        ground_transform.setOrigin(btVector3(0.5f, 0.5f, -0.5f));
+
+        btCollisionObject* body = new btCollisionObject();
         body->setCollisionShape(sphere_shape);
+        body->setWorldTransform(ground_transform);
+
         demo->physics.world->addCollisionObject(body);
     }
 
@@ -184,6 +208,7 @@ bool Init_Demo_State(DEMO_STATE* demo) {
     VECTOR<U32> all_indices;
     {
         const CHAR* mesh_paths[] = {
+            "data/level1_collision.gltf",
             "data/cube.gltf",
         };
         for (U32 i = 0; i < eastl::size(mesh_paths); ++i) {
@@ -330,9 +355,20 @@ bool Init_Demo_State(DEMO_STATE* demo) {
         );
     }
 
+    library::MIPMAP_GENERATOR mipgen_rgba8 = {};
+    library::Init_Mipmap_Generator(&mipgen_rgba8, gr, DXGI_FORMAT_R8G8B8A8_UNORM);
+
     graphics::Begin_Frame(gr);
 
     library::Init_Gui_Context(&demo->gui, gr, 1);
+
+    Create_And_Upload_Texture(
+        L"data/level1_collision_ao.png",
+        gr,
+        &mipgen_rgba8,
+        &demo->ao_texture,
+        &demo->ao_texture_srv
+    );
 
     // Upload vertices.
     Upload_To_Gpu(gr, demo->vertex_buffer, &all_vertices, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
@@ -344,10 +380,12 @@ bool Init_Demo_State(DEMO_STATE* demo) {
     graphics::Flush_Gpu_Commands(gr);
     graphics::Finish_Gpu_Commands(gr);
 
+    library::Deinit_Mipmap_Generator(&mipgen_rgba8, gr);
+
     library::Init_Frame_Stats(&demo->frame_stats);
 
     demo->camera = {
-        .position = XMFLOAT3(0.0f, 0.0f, -3.2f),
+        .position = XMFLOAT3(0.0f, 8.0f, -13.2f),
         .pitch = 0.0f,
         .yaw = 0.0f,
     };
@@ -370,6 +408,7 @@ void Deinit_Demo_State(DEMO_STATE* demo) {
     graphics::Release_Resource(gr, demo->renderable_const_buffer);
     graphics::Release_Resource(gr, demo->srgb_texture);
     graphics::Release_Resource(gr, demo->depth_texture);
+    graphics::Release_Resource(gr, demo->ao_texture);
     graphics::Release_Pipeline(gr, demo->mesh_pso);
     graphics::Release_Pipeline(gr, demo->physics_debug_pso);
     graphics::Deinit_Graphics(gr);
@@ -514,6 +553,10 @@ void Update_Demo_State(DEMO_STATE* demo) {
     gr->cmdlist->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     gr->cmdlist->SetGraphicsRootConstantBufferView(1, glob_buffer_addr);
     gr->cmdlist->SetGraphicsRootDescriptorTable(2, buffer_table_base);
+    gr->cmdlist->SetGraphicsRootDescriptorTable(
+        3,
+        graphics::Copy_Descriptors_To_Gpu_Heap(gr, 1, demo->ao_texture_srv)
+    );
     for (U32 i = 0; i < demo->renderables.size(); ++i) {
         const RENDERABLE* renderable = &demo->renderables[i];
         gr->cmdlist->SetGraphicsRoot32BitConstants(

@@ -4,7 +4,14 @@
 #define ROOT_SIGNATURE \
     "RootConstants(b0, num32BitConstants = 3), " \
     "CBV(b1), " \
-    "DescriptorTable(SRV(t0, numDescriptors = 3)), " \
+    "DescriptorTable(SRV(t0, numDescriptors = 3), visibility = SHADER_VISIBILITY_VERTEX), " \
+    "DescriptorTable(SRV(t3), visibility = SHADER_VISIBILITY_PIXEL), " \
+    "StaticSampler(" \
+    "   s0, " \
+    "   filter = FILTER_ANISOTROPIC, " \
+    "   maxAnisotropy = 16, " \
+    "   visibility = SHADER_VISIBILITY_PIXEL" \
+    ")"
 
 ConstantBuffer<DRAW_COMMAND> cbv_draw_cmd : register(b0);
 ConstantBuffer<GLOBALS> cbv_glob : register(b1);
@@ -12,6 +19,9 @@ ConstantBuffer<GLOBALS> cbv_glob : register(b1);
 StructuredBuffer<VERTEX> srv_vertices : register(t0);
 Buffer<U32> srv_indices : register(t1);
 StructuredBuffer<RENDERABLE_CONSTANTS> srv_const_renderables : register(t2);
+
+Texture2D srv_ao_texture : register(t3);
+SamplerState sam_aniso : register(s0);
 
 [RootSignature(ROOT_SIGNATURE)]
 void Vertex_Shader(
@@ -46,5 +56,6 @@ void Pixel_Shader(
     XMFLOAT2 uv : _Uv,
     out XMFLOAT4 out_color : SV_Target0
 ) {
-    out_color = XMFLOAT4(0.7f, 0.7f, 0.7f, 1.0f);
+    const XMFLOAT3 ao_color = srv_ao_texture.Sample(sam_aniso, uv).rgb;
+    out_color = XMFLOAT4(ao_color, 1.0f);
 }
