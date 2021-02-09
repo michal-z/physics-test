@@ -77,7 +77,7 @@ export bool Init_Physics(PHYSICS* px) {
         px->collision_config
     );
     px->debug = new DEBUG_DRAW();
-    px->debug->setDebugMode(btIDebugDraw::DBG_DrawWireframe);
+    px->debug->setDebugMode(btIDebugDraw::DBG_DrawWireframe | btIDebugDraw::DBG_DrawFrames);
     px->world->setDebugDrawer(px->debug);
 
     return true;

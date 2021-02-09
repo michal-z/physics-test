@@ -176,7 +176,6 @@ bool Init_Game(GAME* game) {
             .DSVFormat = DXGI_FORMAT_D32_FLOAT,
             .SampleDesc = { .Count = 1, .Quality = 0 },
         };
-        //desc.RasterizerState.FillMode = D3D12_FILL_MODE_WIREFRAME;
         game->mesh_pso = graphics::Create_Graphics_Shader_Pipeline(gr, &desc);
     }
     {
@@ -417,7 +416,7 @@ bool Init_Game(GAME* game) {
 
     game->camera = {
         .position = XMFLOAT3(0.0f, 8.0f, -13.2f),
-        .pitch = 0.0f,
+        .pitch = XM_PI * 0.25f,
         .yaw = 0.0f,
     };
     game->mouse = { .cursor_prev_x = 0, .cursor_prev_y = 0 };
