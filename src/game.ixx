@@ -238,6 +238,13 @@ bool Init_Game(GAME* game) {
         game->level.body->setCollisionShape(game->level.shape);
         game->physics.world->addCollisionObject(game->level.body);
 
+        btTransform t0 = game->player.body->getWorldTransform();
+        btTransform t1 = game->player.body->getWorldTransform();
+        t0.setOrigin(t0.getOrigin() + btVector3(0.5f, 0.0f, 0.0f));
+        t1.setOrigin(t1.getOrigin() + btVector3(2.0f, 0.0f, 0.0f));
+        btCollisionWorld::ClosestConvexResultCallback cb(btVector3(0, 0, 0), btVector3(0, 0, 0));
+        game->physics.world->convexSweepTest(game->player.shape, t0, t1, cb);
+
         const CHAR* mesh_paths[] = {
             "data/cube.gltf",
         };
